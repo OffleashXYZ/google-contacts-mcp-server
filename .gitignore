@@ -1,0 +1,91 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+lambda-package/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OAuth credentials (NEVER commit these)
+credentials.json
+token.json
+client_secret*.json
+oauth*.json
+service-account*.json
+
+# AWS credentials and config
+.aws/
+aws-credentials.json
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+.terraform/
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Secrets and sensitive data
+secrets/
+*.secret
+.secrets
+config/secrets.json
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# Handoff documentation (contains company-specific info)
+HANDOFF.md
+HANDOFF-*.md
+
+# Company/internal documentation
+internal/
+docs/internal/
+company-*
+*-internal.*
+
+# Deployment configs with real values
+config.production.json
+config.staging.json
+*.prod.*
+*.production.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# CDK
+cdk.out/
+.cdk.staging/
+*.assets.json
+
+# PDF documentation files
+*.pdf
+
+# Allow logo in public directory
+!public/logo.png
