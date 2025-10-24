@@ -168,7 +168,7 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
     // Generate our own access and refresh tokens for MCP
     const accessToken = crypto.randomBytes(32).toString('base64url');
     const mcpRefreshToken = crypto.randomBytes(32).toString('base64url');
-    const expiresIn = 3600; // 1 hour
+    const expiresIn = 30 * 24 * 60 * 60; // 30 days
 
     // Store tokens in session manager for later use
     // The session ID IS the access token, so we can verify it later
@@ -226,7 +226,7 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
 
     // Generate new MCP access token (keep same refresh token)
     const newAccessToken = crypto.randomBytes(32).toString('base64url');
-    const expiresIn = 3600; // 1 hour
+    const expiresIn = 30 * 24 * 60 * 60; // 30 days
     const expiresAt = credentials.expiry_date || Date.now() + (expiresIn * 1000);
 
     // Update session with new Google access token
