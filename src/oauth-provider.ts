@@ -169,6 +169,7 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
     const accessToken = crypto.randomBytes(32).toString('base64url');
     const mcpRefreshToken = crypto.randomBytes(32).toString('base64url');
     const expiresIn = 30 * 24 * 60 * 60; // 30 days
+    const mcpTokenExpiresAt = Date.now() + (expiresIn * 1000);
 
     // Store tokens in session manager for later use
     // The session ID IS the access token, so we can verify it later
@@ -180,7 +181,8 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
         accessToken: authData.googleTokens.accessToken, // Google access token
         refreshToken: authData.googleTokens.refreshToken, // Google refresh token
         mcpRefreshToken: mcpRefreshToken, // MCP refresh token for Claude
-        expiresAt: authData.googleTokens.expiresAt,
+        expiresAt: authData.googleTokens.expiresAt, // Google token expiry (~1 hour)
+        mcpTokenExpiresAt: mcpTokenExpiresAt, // MCP token expiry (30 days)
         tokenType: 'Bearer',
         scope: 'https://www.googleapis.com/auth/contacts.readonly',
       });
@@ -227,13 +229,14 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
     // Generate new MCP access token (keep same refresh token)
     const newAccessToken = crypto.randomBytes(32).toString('base64url');
     const expiresIn = 30 * 24 * 60 * 60; // 30 days
-    const expiresAt = credentials.expiry_date || Date.now() + (expiresIn * 1000);
+    const googleTokenExpiresAt = credentials.expiry_date || Date.now() + (3600 * 1000); // Google token ~1 hour
+    const mcpTokenExpiresAt = Date.now() + (expiresIn * 1000); // MCP token 30 days
 
-    // Update session with new Google access token
+    // Update old session with new Google access token
     await this.sessionManager.updateAccessToken(
       session.sessionId,
       credentials.access_token,
-      expiresAt
+      googleTokenExpiresAt
     );
 
     // Save new MCP access token session
@@ -244,7 +247,8 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
       accessToken: credentials.access_token, // New Google access token
       refreshToken: session.refreshToken, // Keep same Google refresh token
       mcpRefreshToken: refreshToken, // Keep same MCP refresh token
-      expiresAt,
+      expiresAt: googleTokenExpiresAt, // Google token expiry (~1 hour)
+      mcpTokenExpiresAt: mcpTokenExpiresAt, // MCP token expiry (30 days)
       tokenType: 'Bearer',
       scope: session.scope,
     });
@@ -260,6 +264,7 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
 
   /**
    * Verify access token and return auth info
+   * Automatically refreshes Google tokens if expired
    */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // Check if session exists in DynamoDB (sessionId = access token)
@@ -268,6 +273,39 @@ export class GoogleOAuthProvider implements OAuthServerProvider {
     if (!session) {
       throw new Error('Invalid or expired access token');
     }
+
+    // Check if Google token needs refresh (expired or within 5 minutes of expiry)
+    const expiryBuffer = 5 * 60 * 1000; // 5 minutes
+    const needsRefresh = session.expiresAt - Date.now() < expiryBuffer;
+
+    if (needsRefresh && session.refreshToken) {
+      try {
+        // Refresh Google access token
+        const oauth2Client = await this.getGoogleOAuthClient();
+        oauth2Client.setCredentials({
+          refresh_token: session.refreshToken,
+        });
+
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        if (credentials.access_token) {
+          const newExpiresAt = credentials.expiry_date || Date.now() + (3600 * 1000);
+
+          // Update session with new Google token
+          await this.sessionManager.updateAccessToken(
+            token,
+            credentials.access_token,
+            newExpiresAt
+          );
+        }
+      } catch (error) {
+        // Log error but don't fail - let the current token be used
+        console.error('Failed to auto-refresh Google token:', error);
+      }
+    }
+
+    // Extend MCP token expiry (sliding window - 30 days from now)
+    // This keeps the same MCP access token valid indefinitely as long as it's used
+    await this.sessionManager.extendSession(token, 30);
 
     // Return auth info from session
     return {

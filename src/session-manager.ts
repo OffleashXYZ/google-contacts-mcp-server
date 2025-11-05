@@ -24,7 +24,8 @@ export interface SessionData {
   accessToken: string; // Google access token
   refreshToken?: string; // Google refresh token
   mcpRefreshToken?: string; // MCP refresh token (given to Claude)
-  expiresAt: number; // Unix timestamp
+  expiresAt: number; // Google token expiry (Unix timestamp)
+  mcpTokenExpiresAt?: number; // MCP access token expiry (Unix timestamp, optional for backwards compatibility)
   tokenType: string;
   scope: string;
   ttl: number; // DynamoDB TTL (auto-delete expired sessions)
@@ -101,13 +102,34 @@ export class SessionManager {
 
     const session = result.Item as SessionData;
 
-    // Check if token is expired
-    if (session.expiresAt < Date.now()) {
-      // Token expired, delete it
-      await this.deleteSession(sessionId);
-      return null;
+    // Check if MCP access token is expired
+    // For backwards compatibility, if mcpTokenExpiresAt doesn't exist, use expiresAt
+    const mcpExpiry = session.mcpTokenExpiresAt || session.expiresAt;
+
+    if (mcpExpiry < Date.now()) {
+      // MCP token expired
+      if (session.refreshToken) {
+        // Has refresh token - can recover! Auto-upgrade legacy sessions
+        if (!session.mcpTokenExpiresAt) {
+          // First time seeing this old session - extend it by 30 days
+          const extensionDays = 30;
+          const extensionMs = extensionDays * 24 * 60 * 60 * 1000;
+          session.mcpTokenExpiresAt = Date.now() + extensionMs;
+
+          // Persist the extension to DynamoDB
+          await this.extendSession(sessionId, extensionDays);
+        }
+        // Return session - verifyAccessToken will refresh the Google token
+        return session;
+      } else {
+        // No refresh token - can't recover, must delete
+        await this.deleteSession(sessionId);
+        return null;
+      }
     }
 
+    // Return session even if Google token (expiresAt) is expired
+    // It will be automatically refreshed by verifyAccessToken()
     return session;
   }
 
@@ -133,6 +155,36 @@ export class SessionManager {
         ExpressionAttributeValues: {
           ':token': accessToken,
           ':expires': expiresAt,
+          ':ttl': ttl,
+          ':updated': now,
+        },
+      })
+    );
+  }
+
+  /**
+   * Extend MCP token expiration and session TTL (sliding expiration)
+   * This allows keeping the same MCP access token valid for longer
+   */
+  async extendSession(
+    sessionId: string,
+    extensionDays: number = 30
+  ): Promise<void> {
+    const now = Date.now();
+    const extensionMs = extensionDays * 24 * 60 * 60 * 1000;
+    const mcpTokenExpiresAt = now + extensionMs;
+
+    // Also extend DynamoDB TTL by 90 days (sliding expiration)
+    const NINETY_DAYS = 90 * 24 * 60 * 60;
+    const ttl = Math.floor(now / 1000) + NINETY_DAYS;
+
+    await this.client.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { sessionId },
+        UpdateExpression: 'SET mcpTokenExpiresAt = :mcpExpires, ttl = :ttl, updatedAt = :updated',
+        ExpressionAttributeValues: {
+          ':mcpExpires': mcpTokenExpiresAt,
           ':ttl': ttl,
           ':updated': now,
         },
