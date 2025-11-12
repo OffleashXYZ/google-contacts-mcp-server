@@ -60,6 +60,7 @@ app.use(
   mcpAuthRouter({
     provider: oauthProvider,
     issuerUrl: new URL(apiEndpoint),
+    resourceServerUrl: new URL(`${apiEndpoint}/mcp`), // Resource at /mcp path
     scopesSupported: ['contacts.readonly'],
     resourceName: 'Google Contacts MCP',
     serviceDocumentationUrl: new URL('https://offleash.xyz'),
